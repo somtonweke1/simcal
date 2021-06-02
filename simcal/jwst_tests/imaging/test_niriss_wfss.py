@@ -5,7 +5,7 @@ from mirage import imaging_simulator
 from mirage import wfss_simulator
 from mirage.utils.constants import FLAMBDA_CGS_UNITS, FLAMBDA_MKS_UNITS, FNU_CGS_UNITS
 from mirage.yaml import yaml_generator
-from jwst.pipeline import Detector1Pipeline
+from jwst.pipeline import Detector1Pipeline, Image2Pipeline, Spec2Pipeline
 from ci_watson.artifactory_helpers  import get_bigdata
 from astropy.io import fits
 
@@ -15,8 +15,13 @@ import io
 import astropy.units as u
 import pytest
 
+os.environ["MIRAGE_DATA"] = "/ifs/jwst/wit/mirage_data/"
+os.environ["CRDS_PATH"] = os.path.join(os.path.expandvars('$HOME'), "crds_cache")
+os.environ["CDRS_SERVER_URL"]="https://jwst-cdrs.stsci.edu"
 
-def test_niriss_wfss(_jail):
+
+
+def test_niriss_wfss():
 
     yaml_output_dir = '.'
     simulations_output_dir = '.'
@@ -28,10 +33,13 @@ def test_niriss_wfss(_jail):
     dates = '2022-10-31'
     datatype = 'linear, raw'
 
-    pointing_file= get_bigdata("jwst/niriss/wfss/niriss_wfss_example.pointing")
-    xml_file= get_bigdata("jwst/niriss/wfss/niriss_wfss_example.xml")
-    catalog_file= get_bigdata("jwst/niriss/wfss/point_sources.cat")
+    #pointing_file= get_bigdata("jwst/niriss/wfss/niriss_wfss_example.pointing")
+    #xml_file= get_bigdata("jwst/niriss/wfss/niriss_wfss_example.xml")
+    #catalog_file= get_bigdata("jwst/niriss/wfss/point_sources.cat")
 
+    pointing_file= '/Users/snweke/mirage/examples/wfss_example_data/niriss_wfss_example.pointing'
+    xml_file= '/Users/snweke/mirage/examples/wfss_example_data/niriss_wfss_example.xml'
+    catalog_file= '/Users/snweke/mirage/examples/wfss_example_data/point_sources.cat'
     catalogs= {'point_source': catalog_file}
 
     yam= yaml_generator.SimInput(xml_file, pointing_file=pointing_file,
@@ -46,9 +54,16 @@ def test_niriss_wfss(_jail):
 
     yam.create_inputs()
 
+    print("Debug")
+
+
     yaml_files = glob(os.path.join(yam.output_dir,"jw*.yaml"))
     yaml_WFSS_files = []
     yaml_imaging_files = []
+    print(yaml_files)
+
+
+    print(yam.output_dir, "THIS IS YAML.OUTPUTDIR")
 
     for f in yaml_files:
         my_dict = yaml.safe_load(open(f))
@@ -67,8 +82,29 @@ def test_niriss_wfss(_jail):
                        create_continuum_seds=True)
         wfss_img_sim.create()
 
-    for yaml_imaging_file in yaml_imaging_files:
+    for yaml_imaging_file in yaml_imaging_files[0:1]:
         print("Imaging simulation for {}".format(yaml_imaging_file))
         img_sim = imaging_simulator.ImgSim()
         img_sim.paramfile = yaml_imaging_file
         img_sim.create()
+
+    
+    rate_files = []
+    uncal_files = glob(os.path.join(simulations_output_dir, '*uncal.fits'))
+    print(uncal_files)
+    for f in uncal_files:
+        result = Detector1Pipeline.call(f)
+        rate_files.append(result)
+        name = result.meta.filename.split("uncal.fits")[0]+'rate.fits'
+        print('\n\nname', os.path.join(output_dir, name), '\n\n')
+        result.save(os.path.join(output_dir, name))
+
+    for f in rate_files:
+        if 'IMAGE' in f.meta.exposure.type:
+            stage2_result = Image2Pipeline.call(f)[0]
+        else:
+            stage2_result = Spec2Pipeline.call(f)[0]
+        name = stage2_result.meta.filename
+        stage2_result.save(os.path.join(output_dir, name))
+
+    #truth_files = glob(os.path.join('uncal.fits', '*.fits'))
